@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+#
+# This script is for demonstration purposes only. It provides
+# a functioning set of calls to show how to export software-protected AES key material 
+# from the Vault service by using the RSA_OAEP_AES_SHA256 algorithm.
+#
+
+
+set -x
+private_key_path=/home/ramesh_bal/private.pem # private wrapping key which is generated within the script itself, do not change
+public_key_path=/home/ramesh_bal/public.pem ## public wrapping key which is generated within the script itself, do not change
+rsa_key_size=2048
+OPENSSL="/Users/parth/local/bin/openssl.sh" # path to openssl
+
+#
+# Generate key pair
+#
+${OPENSSL} genrsa -out ${private_key_path} ${rsa_key_size}
+$OPENSSL rsa -in ${private_key_path} -outform PEM -pubout -out ${public_key_path}
+
+
+
+KEY_OCID="ocid1.key.oc1.iad.ejtcsslqaahyi.abuwcljt5j23jrhqjtqmmtrappyo7vsifdielhmxaeslqgifs2as67opxb7q" # The Oracle Cloud Identifier (OCID) of the software-protected master encryption key to export.
+ENCRYPTION_ALGORITHM="RSA_OAEP_AES_SHA256"
+RSA_KEY_SIZE_IN_BYTES="256" # Specify 256 (for 2048 bits) or 512 (for 4096 bits).
+VAULT_CRYPTO_ENDPOINT="https://ejtcsslqaahyi-crypto.kms.us-ashburn-1.oraclecloud.com" # The cryptographic endpoint of the vault that contains the software-protected master encryption key.
+PUBLIC_KEY_STRING="`cat ${public_key_path}`" # The content of the public key.
+PRIVATE_KEY_PATH=${private_key_path} # The location of the private key.
+SOFTWARE_KEY_PATH="./outputted_software_rsakey_e2e.pem" # The location for outputting the software-protected master encryption key.
+TEMP_AES_KEY_PATH="./outputted_temp_aes_key2.pem" # The location for outputting the temporary AES key.
+TEMP_WRAPPED_AES_PATH="./outputted_wrapped_temporary_AES_key2.pem" # The location for outputting the wrapped temporary AES key.
+WRAPPED_SOFTWARE_KEY_PATH="./outputted_wrapped_master_encryption_rsakey2.pem" # The location for outputting the wrapped software-protected master encryption key, otherwise known as the wrapped target key.
+
+
+declare -a hex_array wrapped_temp_aes_key_array wrapped_targetKey_array wrapped_targetKey_array_length
+# Invoke the CLI to export a software-protected master encryption key. (The response contains the wrapped data in two parts.
+# The first part is a wrapped temporary AES key. The second part is the wrapped software-protected master encryption key, 
+# also known as the wrapped target key.)
+wrapped_data=$(oci kms crypto key export --key-id ${KEY_OCID} --algorithm ${ENCRYPTION_ALGORITHM} --public-key "${PUBLIC_KEY_STRING}" --endpoint ${VAULT_CRYPTO_ENDPOINT} | grep encrypted-key | cut -d: -f2  | sed 's# "\(.*\)",#\1#g')
+
+# Decode the encoded wrapped data and convert it to hexadecimal format.
+wrapped_data_hex_array=(`echo ${wrapped_data} | base64 -d | xxd -p -c1`)
+wrapped_data_hex_array_length=${#wrapped_data_hex_array[*]}
+
+# Extract the wrapped temporary AES key. (The length of this first portion of the wrapped data is equal to the length of the private RSA wrapping key.)
+wrapped_temp_aes_key_array=("${wrapped_data_hex_array[@]:0:${RSA_KEY_SIZE_IN_BYTES}}")
+start_index_target_key=${#wrapped_temp_aes_key_array[*]}
+
+# Extract the wrapped target key. (This second portion of the wrapped data is the software-protected master encryption key.)
+wrapped_targetKey_array=("${wrapped_data_hex_array[@]:${start_index_target_key}:$(( ${wrapped_data_hex_array_length} - ${start_index_target_key} ))}")
+wrapped_targetKey_array_length=${#wrapped_targetKey_array[*]}
+
+# Trim spaces so that only hexadecimals remain. Convert hexadecimals to data and write to file.
+wrapped_temp_aes_key_data="${wrapped_temp_aes_key_array[@]} | tr -d ' ' | xxd -p -r"
+eval "echo -n $wrapped_temp_aes_key_data > $TEMP_WRAPPED_AES_PATH"
+
+# Trim spaces so that only hexadecimals remain. Convert hexadecimals to data and write to file.
+wrapped_target_key_data="${wrapped_targetKey_array[@]} | tr -d ' ' | xxd -p -r"
+eval "echo $wrapped_target_key_data > $WRAPPED_SOFTWARE_KEY_PATH"
+
+# Unwrap the wrapped_temp_aes_key by using the private RSA wrapping key.
+${OPENSSL} pkeyutl -decrypt -inkey ${PRIVATE_KEY_PATH} -in ${TEMP_WRAPPED_AES_PATH} -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out ${TEMP_AES_KEY_PATH}
+
+TEMP_AES_KEY_HEX=$(hexdump -v -e '/1 "%02X"' < ${TEMP_AES_KEY_PATH})
+
+# Unwrap the wrapped software-protected key material by using the unwrapped temporary AES key. The -id-aes256-wrap-pad OpenSSL cipher value specifies the RFC-3394-compliant CKM_RSA_AES_KEY_WRAP mechanism to use for unwrapping. As required by RFC 5649, -iv specifies an "alternative initial value" that is a 32-bit message length indicator expressed in hexadecimal.
+${OPENSSL} enc -iv A65959A6 -in $WRAPPED_SOFTWARE_KEY_PATH -d -id-aes256-wrap-pad -K ${TEMP_AES_KEY_HEX} -out ${SOFTWARE_KEY_PATH}

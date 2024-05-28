@@ -14,7 +14,7 @@ encrypted_key_base64 = "ZWusoVgUV2tALNKKAabE5nVWSwCTlYSePl++i/BbUMHqwAT/v8jWWBQF
 
 # Decode the base64 encoded encrypted key
 encrypted_key = base64.b64decode(encrypted_key_base64)
-
+print(encrypted_key)
 # Decrypt the encrypted key using the private key
 decrypted_key = private_key.decrypt(
     encrypted_key,

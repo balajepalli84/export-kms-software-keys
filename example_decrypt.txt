@@ -1,0 +1,30 @@
+import oci
+
+# Create a default config using DEFAULT profile in default location
+# Refer to
+# https://docs.cloud.oracle.com/en-us/iaas/Content/API/Concepts/sdkconfig.htm#SDK_and_CLI_Configuration_File
+# for more info
+config = oci.config.from_file()
+
+
+# Initialize service client with default config file
+key_management_client = oci.key_management.KmsCryptoClient(
+    config, "https://endpoint_of_this_service.com")
+
+
+# Send the request to service, some parameters are not required, see API
+# doc for more info
+decrypt_response = key_management_client.decrypt(
+    decrypt_data_details=oci.key_management.models.DecryptDataDetails(
+        ciphertext="EXAMPLE-ciphertext-Value",
+        key_id="ocid1.test.oc1..<unique_ID>EXAMPLE-keyId-Value",
+        associated_data={
+            'EXAMPLE_KEY_WURVT': 'EXAMPLE_VALUE_NJs0lFXMUFwRvetyekmv'},
+        logging_context={
+            'EXAMPLE_KEY_4eQvT': 'EXAMPLE_VALUE_ieD2PUkV0LlhGA4Hg2H9'},
+        key_version_id="ocid1.test.oc1..<unique_ID>EXAMPLE-keyVersionId-Value",
+        encryption_algorithm="RSA_OAEP_SHA_1"),
+    opc_request_id="CQBITS9OCQB9XSSSMOCX<unique_ID>")
+
+# Get the data from response
+print(decrypt_response.data)
